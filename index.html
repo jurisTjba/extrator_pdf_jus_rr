@@ -358,52 +358,219 @@ function limpar(t) {
           .replace(/\n\|[\s|]*\|\n/g, "\n").trim();
 }
 
+// [MELHORIA 5] Sistema de classificação redesenhado.
+//
+// Antes: substring simples com early-return. Isso gerava falsos positivos
+// graves (ex.: petição que cita "apelação" dentro de uma ementa virava RECURSO;
+// petição que menciona "funcionário da portaria" virava PORTARIA).
+//
+// Agora: cada tipo tem uma lista de sinais, cada sinal com um peso. O tipo
+// com maior pontuação vence. Sinais muito específicos (regex de cabeçalho,
+// expressões jurídicas decisórias) recebem peso alto; palavras ambíguas
+// recebem peso baixo ou são removidas. Bônus adicional se o sinal aparece
+// nos primeiros 400 caracteres (cabeçalho da peça).
+//
+// Formato: [TIPO, [[sinal, peso], ...], pesoMinimo]
+// - sinal: string (case-insensitive) OU RegExp
+// - peso: 1 (fraco), 3 (médio), 6 (forte), 10 (decisivo/único daquele tipo)
+// - pesoMinimo: pontuação mínima para o tipo "ganhar" (evita match marginal)
 const TIPOS = [
-  ["AUTUAÇÃO",["autuação","autuo o(a) presente"]],
-  ["PORTARIA",["portaria","resolve:","instaurar inquérito"]],
-  ["DENÚNCIA",["oferece a presente den","denuncia como incurso"]],
-  ["SENTENÇA",["vistos, etc","julgo procedente","julgo improcedente","condeno o r","absolvo o r"]],
-  ["PRONÚNCIA",["pronuncio o r","pronuncia o r"]],
-  ["ALEGAÇÕES",["alegações finais","memoriais"]],
-  ["RESPOSTA",["resposta à acusação","defesa prévia"]],
-  ["RECURSO",["apelação","razões recursais","contrarrazões"]],
-  ["BO",["boletim de ocorrência","dados do registro","relato/histórico"]],
-  ["DECLARAÇÃO",["termo de declarações","às perguntas do(a) delegado"]],
-  ["INTERROGATÓRIO",["termo de qualificação e interrogatório"]],
-  ["RELATÓRIO",["relatório final","dos fatos e circunstâncias apuradas"]],
-  ["MPU",["pedido de medida protetiva","medida(s) protetiva(s) de urgência"]],
-  ["RISCO",["formulário nacional de avaliação de risco"]],
-  ["LAUDO",["laudo de exame","lesões corporais","exame médico pericial"]],
-  ["DECISÃO",["decido que","defiro o pedido","indefiro o pedido"]],
-  ["DESPACHO",["despacho","cite-se","intime-se","cumpra-se"]],
-  ["ATA",["ata de audiência","aberta a audiência"]],
-  ["OFÍCIO",["ofício nº","oficio nº"]],
-  ["CARTA PRECATÓRIA",["carta precatória"]],
-  ["BIC",["boletim de informação criminal"]],
-  ["CERTIDÃO",["certifico que","certidão","certidão de publicação"]],
-  ["INTIMAÇÃO",["intimação","fica intimado"]],
-  ["MANDADO",["mandado de"]],
-  ["ALVARÁ",["alvará de soltura"]],
-  ["CONCLUSOS",["autos conclusos"]],
-  ["REMESSA",["remessa","faço a remessa"]],
-  ["RECIBO",["recibo de entrega"]],
-  ["PETIÇÃO",["petição ministerial","petição","registrar ciência"]],
-  ["ASSINATURA",["gerado por sinesp"]],
+  ["AUTUAÇÃO", [
+    [/\bauto de autua[çc][aã]o\b/i, 10],
+    [/\bautuo o\(a\) presente\b/i, 10],
+  ], 6],
+  ["PORTARIA", [
+    [/^[\s#]*PORTARIA\b/im, 10],                      // cabeçalho literal
+    [/\bportaria n[°º]\s*\d/i, 10],
+    [/\binstaurar? inqu[ée]rito policial\b/i, 8],
+    [/\bresolve:\s*$/im, 3],
+  ], 8],
+  ["DENÚNCIA", [
+    [/\boferece a presente den[úu]ncia\b/i, 10],
+    [/\bdenuncia como incurso\b/i, 10],
+    [/\bminist[ée]rio p[úu]blico.*oferece\b/i, 6],
+  ], 8],
+  ["SENTENÇA", [
+    [/^[\s#]*SENTEN[ÇC]A\b/im, 10],
+    [/\bjulgo (?:totalmente )?procedente\b/i, 8],
+    [/\bjulgo (?:totalmente )?improcedente\b/i, 8],
+    [/\bcondeno o r[ée]u\b/i, 8],
+    [/\babsolvo o r[ée]u\b/i, 8],
+    [/\bjulgo extinto\b.*(m[ée]rito|execu)/i, 6],
+  ], 8],
+  ["PRONÚNCIA", [
+    [/\bpronuncio o r[ée]u\b/i, 10],
+    [/\bimpronuncio o r[ée]u\b/i, 10],
+  ], 8],
+  ["ALEGAÇÕES", [
+    [/\balega[çc][õo]es finais\b/i, 10],
+    [/\bmemoriais finais\b/i, 8],
+  ], 6],
+  ["RESPOSTA", [
+    [/\bresposta [àa] acusa[çc][aã]o\b/i, 10],
+    [/\bdefesa pr[ée]via\b/i, 8],
+  ], 6],
+  ["RECURSO", [
+    // Cabeçalhos literais — alta confiança
+    [/^[\s#]*(?:RAZÕES DE )?APELA[ÇC][ÃA]O\s*$/im, 10],
+    [/^[\s#]*(?:CONTRA)?RAZÕES RECURSAIS\b/im, 10],
+    [/\binterp[õo]e o presente recurso\b/i, 10],
+    [/\binterp[õo]e a presente apela[çc][aã]o\b/i, 10],
+    [/\btempestividade do presente recurso\b/i, 6],
+    // "Apelação" sozinha vira peso baixo (é muito citada em ementas)
+    [/\bapela[çc][aã]o\b/i, 1],
+  ], 8],
+  ["BO", [
+    [/\bboletim de ocorr[êe]ncia\b/i, 10],
+    [/\brelato\/hist[óo]rico\b/i, 6],
+    [/\bdados do registro\b/i, 3],
+  ], 8],
+  ["DECLARAÇÃO", [
+    [/\btermo de declara[çc][õo]es\b/i, 10],
+    [/\b[àa]s perguntas do\(a\) delegado\b/i, 8],
+  ], 8],
+  ["INTERROGATÓRIO", [
+    [/\btermo de (?:qualifica[çc][aã]o e )?interrogat[óo]rio\b/i, 10],
+  ], 8],
+  ["RELATÓRIO", [
+    [/\brelat[óo]rio final\b/i, 10],
+    [/\bdos fatos e circunst[âa]ncias apuradas\b/i, 8],
+  ], 8],
+  ["MPU", [
+    [/\bmedida\(?s?\)? protetiva\(?s?\)? de urg[êe]ncia\b/i, 10],
+    [/\bpedido de medida protetiva\b/i, 10],
+  ], 8],
+  ["RISCO", [
+    [/\bformul[áa]rio nacional de avalia[çc][aã]o de risco\b/i, 10],
+  ], 8],
+  ["LAUDO", [
+    [/\blaudo de exame\b/i, 10],
+    [/\bexame m[ée]dico pericial\b/i, 10],
+    [/\bles[õo]es corporais\b.*laudo/i, 6],
+  ], 8],
+  ["DECISÃO", [
+    [/^[\s#]*DECIS[ÃA]O\b/im, 10],
+    [/\bdecido que\b/i, 8],
+    [/\b(?:de|in)firo o pedido\b/i, 8],
+    [/\b(?:de|in)firo (?:parcialmente )?os? requerimentos?\b/i, 8],
+    [/\bdetermino a realiza[çc][aã]o\b/i, 3],
+  ], 8],
+  ["DESPACHO", [
+    [/^[\s#]*DESPACHO\b/im, 10],
+    [/\bvistos,?\s*etc\.?\b/i, 6],
+    [/\bcite-se\b/i, 4],
+    [/\bintime-se\b/i, 3],
+    [/\bcumpra-se\b/i, 3],
+  ], 8],
+  ["ATA", [
+    [/\bata de audi[êe]ncia\b/i, 10],
+    [/\baberta a audi[êe]ncia\b/i, 8],
+  ], 8],
+  ["OFÍCIO", [
+    [/^[\s#]*OF[ÍI]CIO\s+n[°º]/im, 10],
+    [/\bof[íi]cio n[°º]\s*[\d.\-\/]+/i, 8],
+  ], 6],
+  ["CARTA PRECATÓRIA", [
+    [/\bcarta precat[óo]ria\b/i, 10],
+  ], 8],
+  ["BIC", [
+    [/\bboletim de informa[çc][aã]o criminal\b/i, 10],
+  ], 8],
+  ["CERTIDÃO", [
+    [/^[\s#]*CERTID[ÃA]O(?:\s+DE\s+\w+)?\s*$/im, 10],
+    [/\bcertifico,?\s+para os devidos fins\b/i, 8],
+    [/\bcertifico que\b/i, 6],
+    [/\bcertid[ãa]o de publica[çc][aã]o\b/i, 8],
+  ], 6],
+  ["INTIMAÇÃO", [
+    [/^[\s#]*INTIMA[ÇC][ÃA]O\b/im, 8],
+    [/\bfica(?:m)? (?:a parte |as partes )?intimad[oa]s?\b/i, 6],
+    [/\bintimem-se (?:a|as) partes?\b/i, 4],
+  ], 6],
+  ["MANDADO", [
+    [/^[\s#]*MANDADO\s+DE\b/im, 10],
+    [/\bmandado de (?:cita|intima|penhora|bus|pris|condu)/i, 8],
+  ], 8],
+  ["ALVARÁ", [
+    [/\balvar[áa] de soltura\b/i, 10],
+  ], 8],
+  ["CONCLUSOS", [
+    [/\bautos conclusos\b/i, 8],
+    [/\btorno os autos conclusos\b/i, 10],
+  ], 8],
+  ["REMESSA", [
+    [/\bfa[çc]o a remessa\b/i, 10],
+    [/\btermo de remessa\b/i, 10],
+  ], 8],
+  ["RECIBO", [
+    [/\brecibo de entrega\b/i, 10],
+  ], 8],
+  ["ATO ORDINATÓRIO", [
+    [/^[\s#]*ATO ORDINAT[ÓO]RIO\b/im, 10],
+  ], 8],
+  ["PETIÇÃO", [
+    // Petição "inicial" tem cabeçalho próprio e forte
+    [/^[\s#]*PETI[ÇC][ÃA]O INICIAL\b/im, 10],
+    // Endereçamento típico de peça inicial/manifestação
+    [/\bao?s? ju[íi]zo\s+da?\s+vara\b/i, 6],
+    [/\bexcelent[íi]ssim[oa]\s+senhor[a]?\s+(?:doutor|dr\.?|ju[íi]z)/i, 6],
+    [/\bvem,?\s+(?:respeitosamente,?\s+)?(?:por seus? advogados?\s+)?(?:[àa]\s+presen[çc]a de\s+)?v(?:\.|ossa)\s+exce/i, 6],
+    [/\bpede(?:\s+e\s+espera)?\s+deferimento\b/i, 3],
+    [/\bnestes\s+termos,?\s*pede\s+deferimento\b/i, 6],
+    [/\bpeti[çc][ãa]o ministerial\b/i, 8],
+    [/\brequer(?:\s+a\s+vossa\s+excel[êe]ncia)?\b.{0,200}\bdeferimento\b/i, 4],
+  ], 6],
+  ["ASSINATURA", [
+    [/\bgerado por sinesp\b/i, 10],
+  ], 10],
 ];
+
 const COMPLETAS = new Set(["AUTUAÇÃO","PORTARIA","DENÚNCIA","SENTENÇA","PRONÚNCIA","ALEGAÇÕES",
   "RESPOSTA","RECURSO","BO","DECLARAÇÃO","INTERROGATÓRIO","RELATÓRIO","MPU","RISCO","LAUDO",
   "DECISÃO","DESPACHO","ATA","CARTA PRECATÓRIA","PETIÇÃO"]);
-const RESUMO = new Set(["OFÍCIO","BIC","CERTIDÃO","INTIMAÇÃO","MANDADO","ALVARÁ","CONCLUSOS","REMESSA","RECIBO"]);
+const RESUMO = new Set(["OFÍCIO","BIC","CERTIDÃO","INTIMAÇÃO","MANDADO","ALVARÁ","CONCLUSOS",
+  "REMESSA","RECIBO","ATO ORDINATÓRIO"]);
 const DESCARTE = new Set(["ASSINATURA"]);
 
 const PADROES_PULAR_OCR = [/Gerado por Sinesp/i];
 
+// Testa um sinal (string ou RegExp) contra o texto
+function testarSinal(sinal, texto, textoLower) {
+  if (sinal instanceof RegExp) return sinal.test(texto);
+  return textoLower.includes(sinal);
+}
+
+// [MELHORIA 5] Classificador por scoring ponderado + bônus por posição.
 function classificar(t) {
-  const lo = t.toLowerCase().slice(0, 2000);
-  for (const [tipo, kws] of TIPOS) {
-    if (kws.some(kw => lo.includes(kw))) return tipo;
+  // Analisa os primeiros 3000 chars — cabeçalhos e primeiros parágrafos
+  // são o que determina a natureza da peça.
+  const texto = t.slice(0, 3000);
+  const textoLower = texto.toLowerCase();
+  const inicio = textoLower.slice(0, 400);
+
+  let melhor = { tipo: "DOC", score: 0 };
+  for (const [tipo, sinais, minimo] of TIPOS) {
+    let score = 0;
+    for (const [sinal, peso] of sinais) {
+      if (testarSinal(sinal, texto, textoLower)) {
+        score += peso;
+        // Bônus: sinal aparece no início (primeiros 400 chars)
+        // — aumenta confiança de que é realmente o tipo da peça,
+        //   e não apenas uma citação.
+        if (sinal instanceof RegExp) {
+          // Testa o mesmo regex contra o início
+          if (sinal.test(texto.slice(0, 400))) score += peso;
+        } else {
+          if (inicio.includes(sinal)) score += peso;
+        }
+      }
+    }
+    // Só considera se atingiu o mínimo de confiança configurado para o tipo
+    if (score >= minimo && score > melhor.score) {
+      melhor = { tipo, score };
+    }
   }
-  return "DOC";
+  return melhor.tipo;
 }
 
 function primeiraLinha(t, n=120) {
@@ -424,40 +591,141 @@ function extrairNumero(nome) {
   return nome.replace(/\.pdf$/i, "");
 }
 
+// [MELHORIA 6] Extração expandida de metadados da capa do PJe.
+// Agora captura também o número do processo (redundante mas valida), valor,
+// partes e órgão julgador — e formata esses dados em um bloco estruturado
+// próprio, evitando que a tabela crua de documentos polua o Markdown.
 function extrairMetaCapa(t) {
-  const meta = { classe: "", assunto: "" };
-  const mc = t.match(/Classe:\s*\*?\*?([^\n*]+)/); if (mc) meta.classe = mc[1].trim();
-  const ma = t.match(/Assuntos?:\s*\*?\*?([^\n*]+)/); if (ma) meta.assunto = ma[1].trim();
+  const meta = { classe: "", assunto: "", orgao: "", valor: "", distribuicao: "",
+                 exequente: "", executado: "" };
+  const grab = (re) => { const m = t.match(re); return m ? m[1].trim().replace(/\s+/g, " ") : ""; };
+
+  meta.classe       = grab(/Classe:\s*\*?\*?([^\n*]+)/i);
+  meta.assunto      = grab(/Assuntos?:\s*\*?\*?([^\n*]+)/i);
+  meta.orgao        = grab(/[ÓO]rg[ãa]o\s+julgador:\s*([^\n*]+)/i);
+  meta.valor        = grab(/Valor\s+da\s+causa:\s*R?\$?\s*([^\n*]+)/i);
+  meta.distribuicao = grab(/(?:Última|Ultima)\s+distribui[çc][ãa]o\s*:\s*([^\n*]+)/i);
+
+  // Partes: o PJe coloca o nome seguido de "(EXEQUENTE)" ou "(REQUERENTE)" etc.
+  const exq = t.match(/([A-ZÁ-Ú][A-ZÁ-Ú\s.\-&]{2,80}?)\s*\((?:EXEQUENTE|REQUERENTE|AUTOR|RECLAMANTE|IMPETRANTE)\)/);
+  const exc = t.match(/([A-ZÁ-Ú][A-ZÁ-Ú\s.\-&]{2,80}?)\s*\((?:EXECUTADO|REQUERIDO|R[ÉE]U|RECLAMADO|IMPETRADO)\)/);
+  if (exq) meta.exequente = exq[1].trim().replace(/\s+/g, " ");
+  if (exc) meta.executado = exc[1].trim().replace(/\s+/g, " ");
+
   return meta;
 }
 
-function fmtIds(ids) {
-  if (!ids.length) return "";
-  return ids.map(([n,p]) => `Num. ${n} - Pág. ${p}`).join(", ");
+// [MELHORIA 6] Detecta se uma página é a CAPA do PJe (índice de documentos).
+// A capa do PJe tem: metadados do processo + uma tabela "Documentos" com
+// colunas Id/Data/Documento/Tipo que, extraída linearmente, vira lixo.
+// Quando detectada, o pipeline DESCARTA o conteúdo bruto da capa — os
+// metadados já foram extraídos em extrairMetaCapa e exibidos no cabeçalho.
+function ehCapaPje(texto) {
+  if (!texto) return false;
+  const sinais = [
+    /PJe\s*[-–]\s*Processo Judicial/i,
+    /[ÓO]rg[ãa]o\s+julgador:/i,
+    /Classe:\s*\w/i,
+    /Valor\s+da\s+causa:/i,
+    /\b(EXEQUENTE|REQUERENTE|AUTOR|RECLAMANTE)\b.*\n.*\bADVOGADO\b/si,
+  ];
+  const hits = sinais.filter(re => re.test(texto)).length;
+  // 3+ sinais de capa + presença da seção "Documentos" → é a capa
+  return hits >= 3 && /\bDocumentos?\b[\s\S]{0,200}\bTipo\b/i.test(texto);
 }
 
-function gerarMarkdown(numero, meta, nPags, grupos) {
-  const md = [`# ${numero}`];
-  const info = [meta.classe, meta.assunto, `${nPags} págs`].filter(Boolean);
-  md.push(info.join(" | "), "");
-  let resumos = [];
-  for (const g of grupos) {
-    const pags = g.pag_ini === g.pag_fim ? `p.${g.pag_ini}` : `p.${g.pag_ini}-${g.pag_fim}`;
-    const ids = fmtIds(g.doc_ids);
-    if (COMPLETAS.has(g.tipo) || g.tipo === "DOC") {
-      if (resumos.length) { md.push("## Peças Secundárias", ...resumos, ""); resumos = []; }
-      let h = `## ${g.tipo} (${pags})`;
-      if (ids) h += ` [${ids}]`;
-      md.push(h, "", g.texto, "");
-    } else if (RESUMO.has(g.tipo)) {
-      let e = `- **${g.tipo}** ${pags}`;
-      if (ids) e += ` [${ids}]`;
-      e += `: ${primeiraLinha(g.texto)}`;
-      resumos.push(e);
-    }
+// [MELHORIA 8] Consolida uma lista de [num_doc, pagina] em notação compacta.
+// Transforma: [[54543,"1"],[54543,"2"],[54543,"3"],[53977,"1"]]
+// Em:         "Num. 54543 (p.1-3), Num. 53977 (p.1)"
+function fmtIds(ids) {
+  if (!ids || !ids.length) return "";
+
+  // Agrupa páginas por número de documento, preservando ordem de aparição
+  const ordem = [];
+  const porNum = new Map();
+  for (const [num, pag] of ids) {
+    const p = parseInt(pag, 10);
+    if (isNaN(p)) continue;
+    if (!porNum.has(num)) { porNum.set(num, []); ordem.push(num); }
+    porNum.get(num).push(p);
   }
-  if (resumos.length) md.push("## Peças Secundárias", ...resumos, "");
-  return md.join("\n");
+
+  // Para cada num, comprime páginas em ranges contíguos (1,2,3,5 → 1-3,5)
+  const partes = [];
+  for (const num of ordem) {
+    const pags = [...new Set(porNum.get(num))].sort((a, b) => a - b);
+    const ranges = [];
+    let i = 0;
+    while (i < pags.length) {
+      let j = i;
+      while (j + 1 < pags.length && pags[j + 1] === pags[j] + 1) j++;
+      ranges.push(i === j ? `${pags[i]}` : `${pags[i]}-${pags[j]}`);
+      i = j + 1;
+    }
+    partes.push(`Num. ${num} (p.${ranges.join(",")})`);
+  }
+  return partes.join(", ");
+}
+
+// [MELHORIA 7] Geração do Markdown final redesenhada.
+//
+// Mudanças principais:
+//   1. Cabeçalho rico em YAML-like, fácil de parsear por LLMs.
+//   2. Seção única "Peças Secundárias" ao final, consolidada (antes havia
+//      várias seções dispersas pelo documento, toda vez que uma peça
+//      principal aparecia depois de secundárias).
+//   3. Blocos `DOC` deixam de virar peças independentes — eles representam
+//      continuações textuais ou páginas não classificadas, que agora são
+//      mescladas na peça principal anterior OU agrupadas como "Páginas
+//      complementares" no fim, se forem órfãs.
+//   4. IDs de documento consolidados via novo fmtIds.
+function gerarMarkdown(numero, meta, nPags, grupos) {
+  const md = [];
+
+  // --- Cabeçalho estruturado ---
+  md.push(`# ${numero}`);
+  md.push("");
+  const linhasHeader = [];
+  if (meta.classe)       linhasHeader.push(`**Classe:** ${meta.classe}`);
+  if (meta.assunto)      linhasHeader.push(`**Assunto:** ${meta.assunto}`);
+  if (meta.orgao)        linhasHeader.push(`**Órgão julgador:** ${meta.orgao}`);
+  if (meta.valor)        linhasHeader.push(`**Valor da causa:** R$ ${meta.valor}`);
+  if (meta.distribuicao) linhasHeader.push(`**Distribuição:** ${meta.distribuicao}`);
+  if (meta.exequente)    linhasHeader.push(`**Autor/Exequente:** ${meta.exequente}`);
+  if (meta.executado)    linhasHeader.push(`**Réu/Executado:** ${meta.executado}`);
+  linhasHeader.push(`**Total de páginas:** ${nPags}`);
+  linhasHeader.push(`**Peças identificadas:** ${grupos.filter(g => g.tipo !== "DOC").length}`);
+  md.push(linhasHeader.join("  \n"), "");
+  md.push("---", "");
+
+  // --- Corpo: peças completas + coleta de resumos para o final ---
+  const resumos = [];
+  for (const g of grupos) {
+    const pags = g.pag_ini === g.pag_fim ? `p.${g.pag_ini}` : `p.${g.pag_ini}–${g.pag_fim}`;
+    const ids  = fmtIds(g.doc_ids);
+    const idsStr = ids ? ` — ${ids}` : "";
+
+    if (COMPLETAS.has(g.tipo)) {
+      md.push(`## ${g.tipo} (${pags})${idsStr}`, "", g.texto.trim(), "");
+    } else if (RESUMO.has(g.tipo)) {
+      // Um item da lista de peças secundárias: tipo, intervalo de páginas,
+      // ids consolidados e prévia da primeira linha significativa.
+      let linha = `- **${g.tipo}** — ${pags}`;
+      if (ids) linha += ` [${ids}]`;
+      const preview = primeiraLinha(g.texto, 140);
+      if (preview) linha += `\n  > ${preview}`;
+      resumos.push(linha);
+    }
+    // DOCs órfãos (não mesclados) são descartados do MD final — não
+    // trazem informação classificável e só poluem o output.
+  }
+
+  // --- Peças secundárias: seção única ao final ---
+  if (resumos.length) {
+    md.push("---", "", "## Peças Secundárias (resumo)", "", ...resumos, "");
+  }
+
+  return md.join("\n").replace(/\n{3,}/g, "\n\n");
 }
 
 // ============================================================
@@ -666,11 +934,52 @@ async function ocrCanvas(canvas) {
   return data.text;
 }
 
-// [OPT 5] Pula OCR em páginas claramente de ruído
+// [MELHORIA 4] Detecção de encoding corrompido (fonts MacRoman, Identity-H
+// sem CMap, etc.). Páginas assim PASSAM no teste de tamanho, mas o texto
+// extraído é lixo irrecuperável — só OCR resolve.
+//
+// Caracteres típicos de corrupção em PDFs jurídicos brasileiros escaneados:
+// ∞ (deveria ser °), È/Á/„ (deveriam ser acentos), ˙/ı (aspas), ï/Ù, etc.
+const CHARS_CORROMPIDOS = /[∞ÈÁ„‡ïÙ˙ıÌı‰ÒÏü¿¬«¶®©ª¯±²³µ¸¹º»¼½¾]/g;
+
+function razaoCaracteresValidos(t) {
+  if (!t) return 0;
+  // Proporção de caracteres alfabéticos latinos (com ou sem acento) + dígitos
+  const validos = (t.match(/[a-zA-ZáéíóúâêôãõàèìòùäëïöüçñÁÉÍÓÚÂÊÔÃÕÀÈÌÒÙÄËÏÖÜÇÑ0-9 ]/g) || []).length;
+  return validos / t.length;
+}
+
+function densidadeCorrupcao(t) {
+  if (!t) return 0;
+  const corrompidos = (t.match(CHARS_CORROMPIDOS) || []).length;
+  return corrompidos / t.length;
+}
+
+// [OPT 5 + MELHORIA 4] Decisão multi-critério sobre necessidade de OCR.
+// Uma página precisa de OCR quando:
+//   (a) tem pouco texto (critério original), OU
+//   (b) tem texto mas o encoding está corrompido (nova detecção), OU
+//   (c) razão de caracteres válidos é muito baixa (texto-lixo), OU
+//   (d) poucas "palavras reais" (sequências alfabéticas de 3+ chars).
 function deveOcrizar(textoNativo, threshold) {
-  if (textoNativo.length >= threshold) return false;
+  // Padrões de ruído puro (ex.: só "Gerado por Sinesp") → não OCRiza
   if (PADROES_PULAR_OCR.some(r => r.test(textoNativo))) return false;
-  return true;
+
+  const t = (textoNativo || "").trim();
+  // (a) Texto curto demais
+  if (t.length < threshold) return true;
+
+  // (b) Encoding corrompido: mais de 2% de chars típicos de fonte mal-mapeada
+  if (densidadeCorrupcao(t) > 0.02) return true;
+
+  // (c) Razão de caracteres válidos < 55% indica texto-lixo
+  if (razaoCaracteresValidos(t) < 0.55) return true;
+
+  // (d) Poucas palavras de 3+ letras — indica fragmentação extrema
+  const palavras = t.split(/\s+/).filter(p => /^[a-zA-Záéíóúâêôãõç]{3,}$/i.test(p)).length;
+  if (palavras < 15) return true;
+
+  return false;
 }
 
 // ============================================================
@@ -784,12 +1093,18 @@ async function processarPdf(file, opts, onProgress) {
     }));
   }
 
-  // FASE 4: classificar, limpar, agrupar
+  // --- Metadados da capa (antes do filtro, para aproveitar a primeira pág) ---
+  const meta = extrairMetaCapa(textosNativos[0] || "");
+  const capaIdx = ehCapaPje(textosNativos[0] || "") ? 0 : -1;
+
+  // --- FASE 4: classificar, limpar, agrupar ---
   let charsBruto = 0;
   const pecas = [];
   for (let i = 0; i < nPags; i++) {
     const t = textosNativos[i] || "";
     charsBruto += t.length;
+    if (i === capaIdx) continue; // [MELHORIA 6] capa já virou metadados
+
     const docId = extrairDocId(t);
     const limpo = limpar(t);
     if (limpo.length < 30) continue;
@@ -798,26 +1113,63 @@ async function processarPdf(file, opts, onProgress) {
     pecas.push({ pag: i + 1, tipo, texto: limpo, doc_id: docId });
   }
 
+  // [MELHORIA 8] Agrupamento com mescla inteligente de DOC na peça principal
+  // anterior. Regras:
+  //   1. Mesmo tipo em páginas consecutivas → agrega (como antes).
+  //   2. DOC logo após peça COMPLETA → vira continuação dela (texto e ids
+  //      são anexados ao grupo anterior; pag_fim avança).
+  //   3. DOC entre peças secundárias ou isolado → vira grupo DOC próprio,
+  //      mas é FILTRADO na geração do Markdown (não polui o output).
+  //   4. Peças RESUMO adjacentes do mesmo tipo agregam normalmente.
   const grupos = [];
   for (const p of pecas) {
     const u = grupos[grupos.length - 1];
+
+    // Caso 1: mesmo tipo contíguo → agrega
     if (u && u.tipo === p.tipo) {
       u.pag_fim = p.pag;
       u.texto += "\n\n" + p.texto;
       if (p.doc_id) u.doc_ids.push(p.doc_id);
+      continue;
+    }
+
+    // Caso 2: DOC após COMPLETA → continuação natural da peça principal
+    if (u && p.tipo === "DOC" && COMPLETAS.has(u.tipo)) {
+      u.pag_fim = p.pag;
+      u.texto += "\n\n" + p.texto;
+      if (p.doc_id) u.doc_ids.push(p.doc_id);
+      continue;
+    }
+
+    // Caso padrão: novo grupo
+    grupos.push({
+      tipo: p.tipo, pag_ini: p.pag, pag_fim: p.pag,
+      texto: p.texto, doc_ids: p.doc_id ? [p.doc_id] : []
+    });
+  }
+
+  // [MELHORIA 8 extra] Segunda passada: mescla DOC órfãos adjacentes a
+  // uma COMPLETA anterior, mesmo que separados por outros DOCs. Isso captura
+  // sequências como [PETIÇÃO, DOC, DOC, DOC] onde os DOCs são todos páginas
+  // da mesma petição.
+  const gruposMesclados = [];
+  for (const g of grupos) {
+    const ultimo = gruposMesclados[gruposMesclados.length - 1];
+    if (ultimo && g.tipo === "DOC" && COMPLETAS.has(ultimo.tipo)
+        && g.pag_ini === ultimo.pag_fim + 1) {
+      ultimo.pag_fim = g.pag_fim;
+      ultimo.texto += "\n\n" + g.texto;
+      ultimo.doc_ids.push(...g.doc_ids);
     } else {
-      grupos.push({
-        tipo: p.tipo, pag_ini: p.pag, pag_fim: p.pag,
-        texto: p.texto, doc_ids: p.doc_id ? [p.doc_id] : []
-      });
+      gruposMesclados.push(g);
     }
   }
 
-  const meta = extrairMetaCapa(textosNativos[0] || "");
-  const mdText = gerarMarkdown(numero, meta, nPags, grupos);
+  const mdText = gerarMarkdown(numero, meta, nPags, gruposMesclados);
 
   const resultado = {
-    numero, meta, nPags, pecas: grupos.length,
+    numero, meta, nPags,
+    pecas: gruposMesclados.filter(g => g.tipo !== "DOC").length,
     charsBruto, charsLimpo: mdText.length,
     tokensAprox: Math.floor(mdText.length / 4),
     reducaoPct: charsBruto > 0 ? (1 - mdText.length / charsBruto) * 100 : 0,
