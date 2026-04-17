@@ -1,0 +1,1104 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Extrator PDF Jurídico → Markdown (otimizado)</title>
+<style>
+  :root {
+    --bg: #0b1120;
+    --bg-2: #111827;
+    --surface: #1a2234;
+    --surface-2: #212b40;
+    --border: #2d3a54;
+    --border-soft: #243049;
+    --text: #e8edf7;
+    --muted: #93a0bc;
+    --accent: #4f8cff;
+    --accent-2: #6ea6ff;
+    --ok: #2ecc71;
+    --warn: #f5a524;
+    --err: #ef4444;
+    --cache: #a78bfa;
+    --shadow: 0 4px 20px rgba(0,0,0,.25);
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; padding: 32px 24px 60px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    background:
+      radial-gradient(ellipse 80% 40% at 50% 0%, #1a2550 0%, transparent 60%),
+      linear-gradient(180deg, var(--bg) 0%, var(--bg-2) 100%);
+    background-attachment: fixed;
+    color: var(--text);
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+  }
+  .container { max-width: 1040px; margin: 0 auto; }
+
+  /* Cabeçalho */
+  .header { margin-bottom: 28px; }
+  h1 {
+    margin: 0 0 6px;
+    font-size: 26px; font-weight: 700; letter-spacing: -0.02em;
+    background: linear-gradient(135deg, #e8edf7 0%, #93a0bc 100%);
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .sub { color: var(--muted); font-size: 13px; line-height: 1.5; }
+
+  /* Dropzone — crítico: display:block para que o <label> não colapse em inline */
+  .drop {
+    display: block;
+    position: relative;
+    border: 2px dashed var(--border);
+    border-radius: 16px;
+    padding: 56px 24px;
+    text-align: center;
+    cursor: pointer;
+    background: linear-gradient(180deg, var(--surface) 0%, var(--surface-2) 100%);
+    transition: border-color .2s, background .2s, transform .15s;
+    overflow: hidden;
+  }
+  .drop::before {
+    content: "";
+    position: absolute; inset: 0;
+    background: radial-gradient(ellipse 70% 50% at 50% 50%, rgba(79,140,255,.08), transparent 70%);
+    opacity: 0; transition: opacity .25s;
+    pointer-events: none;
+  }
+  .drop:hover { border-color: var(--accent); transform: translateY(-1px); }
+  .drop:hover::before { opacity: 1; }
+  .drop.dragover {
+    border-color: var(--accent); border-style: solid;
+    background: linear-gradient(180deg, #1c2a4f 0%, #1a2242 100%);
+  }
+  .drop.dragover::before { opacity: 1; }
+  .drop input { display: none; }
+  .drop .icon {
+    font-size: 44px;
+    margin-bottom: 10px;
+    display: inline-block;
+    filter: drop-shadow(0 2px 8px rgba(79,140,255,.3));
+  }
+  .drop .label { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+  .drop .hint { color: var(--muted); font-size: 13px; }
+
+  /* Barra de opções */
+  .opts {
+    display: flex; gap: 18px; margin-top: 16px; padding: 14px 18px;
+    background: var(--surface); border: 1px solid var(--border-soft);
+    border-radius: 10px; font-size: 13px;
+    flex-wrap: wrap; align-items: center;
+  }
+  .opts label {
+    cursor: pointer; display: flex; align-items: center; gap: 8px;
+    user-select: none;
+  }
+  .opts input[type=checkbox] {
+    width: 16px; height: 16px; accent-color: var(--accent);
+    cursor: pointer;
+  }
+  .opts input[type=number] {
+    width: 60px; background: var(--bg-2); color: var(--text);
+    border: 1px solid var(--border); padding: 4px 8px; border-radius: 6px;
+    font-size: 13px; text-align: center;
+  }
+  .opts input[type=number]:focus {
+    outline: none; border-color: var(--accent);
+  }
+  .opts .sep { color: var(--border); user-select: none; }
+  .opts .hw {
+    color: var(--muted); font-size: 12px;
+    margin-left: auto;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .opts .hw-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--ok); box-shadow: 0 0 8px var(--ok);
+  }
+
+  /* Botões */
+  .global-actions {
+    display: flex; gap: 10px; margin: 16px 0; flex-wrap: wrap;
+    align-items: center; min-height: 36px;
+  }
+  .global-actions .info { color: var(--muted); font-size: 13px; margin-left: auto; }
+  button {
+    background: var(--accent); color: white; border: none;
+    padding: 9px 16px; border-radius: 8px; cursor: pointer;
+    font-size: 13px; font-weight: 600;
+    transition: filter .15s, transform .1s, background .15s;
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  button:hover:not(:disabled) { filter: brightness(1.08); }
+  button:active:not(:disabled) { transform: translateY(1px); }
+  button:disabled { opacity: .35; cursor: not-allowed; }
+  button.ghost {
+    background: transparent; border: 1px solid var(--border);
+    color: var(--text);
+  }
+  button.ghost:hover:not(:disabled) {
+    background: var(--surface); border-color: var(--accent);
+  }
+
+  /* Resumo global */
+  .summary {
+    background: var(--surface); border: 1px solid var(--border-soft);
+    border-radius: 10px; padding: 16px 18px; margin-top: 16px;
+    display: none; box-shadow: var(--shadow);
+  }
+  .summary.visible { display: block; animation: fadeIn .25s; }
+  .summary-grid {
+    display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px;
+  }
+  .summary-grid > div { text-align: center; }
+  .summary-grid b {
+    display: block; font-size: 22px; font-weight: 700;
+    color: var(--accent-2); letter-spacing: -0.02em;
+  }
+  .summary-grid span { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+
+  /* Jobs */
+  .jobs { margin-top: 4px; }
+  .job {
+    background: var(--surface);
+    border: 1px solid var(--border-soft);
+    border-radius: 10px; padding: 16px; margin-bottom: 12px;
+    box-shadow: var(--shadow);
+    animation: slideIn .3s;
+  }
+  .job.cache { border-left: 3px solid var(--cache); }
+  .job.ok { border-left: 3px solid var(--ok); }
+  .job.err { border-left: 3px solid var(--err); }
+  .job-head {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 10px; gap: 12px;
+  }
+  .job-head .name {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    flex: 1; font-weight: 600; font-size: 14px;
+  }
+  .job-meta {
+    color: var(--muted); font-size: 12px; flex-shrink: 0;
+    background: var(--bg-2); padding: 3px 8px; border-radius: 4px;
+  }
+  .bar {
+    height: 6px; background: var(--bg-2);
+    border-radius: 4px; overflow: hidden;
+  }
+  .bar > div {
+    height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent-2));
+    width: 0%; transition: width .25s;
+    box-shadow: 0 0 12px rgba(79,140,255,.4);
+  }
+  .bar > div.ocr {
+    background: linear-gradient(90deg, var(--warn), #fbc04e);
+    box-shadow: 0 0 12px rgba(245,165,36,.4);
+  }
+  .status { font-size: 13px; margin-top: 8px; color: var(--muted); }
+  .status.ok { color: var(--ok); font-weight: 500; }
+  .status.err { color: var(--err); font-weight: 500; }
+  .status.cache { color: var(--cache); font-weight: 500; }
+  .stats {
+    display: grid; grid-template-columns: repeat(5, 1fr);
+    gap: 8px; margin-top: 12px; font-size: 12px;
+  }
+  .stat {
+    background: var(--bg-2); padding: 8px 6px;
+    border-radius: 6px; text-align: center;
+  }
+  .stat b { display: block; font-size: 16px; color: var(--text); font-weight: 700; }
+  .stat span { color: var(--muted); font-size: 11px; }
+  .actions { margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap; }
+  .actions button { padding: 6px 12px; font-size: 12px; }
+
+  /* Modal */
+  #preview-modal {
+    position: fixed; inset: 0; background: rgba(0,0,0,.85);
+    backdrop-filter: blur(4px);
+    display: none;
+    align-items: center; justify-content: center; z-index: 100; padding: 24px;
+  }
+  #preview-modal.open { display: flex; animation: fadeIn .2s; }
+  #preview-modal .body {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 24px;
+    max-width: 900px; width: 100%; max-height: 85vh; overflow: auto;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 12px; white-space: pre-wrap; line-height: 1.5;
+    box-shadow: 0 20px 60px rgba(0,0,0,.5);
+  }
+  #preview-modal .close {
+    position: absolute; top: 24px; right: 24px;
+    background: var(--err);
+  }
+
+  @keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateY(-6px) }
+    to { opacity: 1; transform: translateY(0) }
+  }
+
+  /* Responsivo */
+  @media (max-width: 680px) {
+    body { padding: 20px 14px 40px; }
+    h1 { font-size: 22px; }
+    .drop { padding: 40px 16px; }
+    .stats, .summary-grid { grid-template-columns: repeat(3, 1fr); }
+    .opts .hw { margin-left: 0; width: 100%; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <h1>Extrator PDF Jurídico → Markdown</h1>
+    <div class="sub">
+      PJe/TJBA · 100% local (nada sai do navegador) · OCR condicional PT-BR ·
+      paralelismo adaptativo ao hardware · cache de resultados por hash
+    </div>
+  </div>
+
+  <label class="drop" id="drop">
+    <input type="file" id="file" accept="application/pdf" multiple>
+    <div class="icon">📄</div>
+    <div class="label">Clique ou arraste PDFs aqui</div>
+    <div class="hint">Múltiplos arquivos processam em paralelo</div>
+  </label>
+
+  <div class="opts">
+    <label><input type="checkbox" id="optOcr" checked> OCR automático</label>
+    <label><input type="checkbox" id="optForceOcr"> Forçar OCR em tudo</label>
+    <span class="sep">|</span>
+    <label>Limiar: <input type="number" id="optThreshold" value="50" min="0" max="500"> chars/pág</label>
+    <span class="sep">|</span>
+    <label><input type="checkbox" id="optCache" checked> Cache</label>
+    <span class="hw" id="hwInfo"><span class="hw-dot"></span><span id="hwInfoText">detectando hardware…</span></span>
+  </div>
+
+  <div class="summary" id="summary"></div>
+
+  <div class="global-actions">
+    <button id="btnZip" disabled>📦 Baixar todos (ZIP)</button>
+    <button id="btnClear" class="ghost">🗑 Limpar lista</button>
+    <button id="btnClearCache" class="ghost">Limpar cache</button>
+    <span class="info" id="cacheInfo"></span>
+  </div>
+
+  <div class="jobs" id="jobs"></div>
+</div>
+
+<div id="preview-modal">
+  <div class="body" id="preview-body"></div>
+  <button class="close" onclick="document.getElementById('preview-modal').classList.remove('open')">Fechar</button>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.mjs" type="module"></script>
+<script type="module">
+  import * as pdfjsLib from "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.mjs";
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.mjs";
+  window.__pdfjs = pdfjsLib;
+</script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.0.5/dist/tesseract.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+
+<script>
+// ============================================================
+// REGEX / CLASSIFICAÇÃO — porte direto do Python
+// ============================================================
+const RE_NUM_PAG = /Num[.\s]+(\d{5,})\s*[-–]\s*P[áa]g[.\s]+(\d+)/g;
+const RE_NUM_ONLY = /Num[.\s]+(\d{5,})/g;
+
+function extrairDocId(t) {
+  const m = [...t.matchAll(RE_NUM_PAG)];
+  if (m.length) { const x = m[m.length-1]; return [x[1], x[2]]; }
+  const m2 = [...t.matchAll(RE_NUM_ONLY)];
+  if (m2.length) return [m2[m2.length-1][1], "1"];
+  return null;
+}
+
+const LIXO = [
+  /Este documento foi gerado pelo usu.rio.*?(?=\n|$)/gi,
+  /N[úu]mero do documento:\s*\d+.*?(?=\n|$)/gi,
+  /https?:\/\/\S+/gi,
+  /Assinado eletronicamente.*?(?=\n|$)/gi,
+  /Num[.\s]+\d{5,}\s*[-–]\s*P[áa]g[.\s]+\d+/gi,
+  /C[óo]digo Verificador \(MAC\).*?(?=\n|$)/gi,
+  /Pg\.\s*\d+\/\d+/gi,
+  /Fls:?\s*\d*\s*\n?\s*Visto:?/gi,
+  /Impresso por:.*?(?=\n|$)/gi,
+  /Data de Impress[ãa]o:.*?(?=\n|$)/gi,
+  /PPe\s*[-–]\s*Procedimentos Policiais.*?(?=\n|$)/gi,
+  /P[áa]gina\s+\d+\s+de\s+\d+/gi,
+  /Gerado por Sinesp Seguran[çc]a/gi,
+  /Documento assinado eletronicamente[\s\S]*?Bras[íi]lia\.?/gi,
+  /O sigilo deste documento[\s\S]*?administrativas\.?/gi,
+  /A autenticidade do documento[\s\S]*?(?=\n\n|$)/gi,
+  /Informe o c[óo]digo verificador.*?(?=\n|$)/gi,
+  /Este documento ainda poder[áa].*?(?=\n|$)/gi,
+  /Minist[ée]rio da\s*\n?\s*Justi[çc]a e Seguran[çc]a P[úu]blica/gi,
+  /Secretaria Nacional de\s*\n?\s*Seguran[çc]a P[úu]blica/gi,
+  /TJBA\s*\n?\s*PJe\s*[-–]\s*Processo Judicial.*/gi,
+  /!\[.*?\]\(.*?\)/gi,
+  /^\d{10,}\s*$/gim,
+  /IP de Registro:.*?(?=\n|$)/gi,
+  /GOVERNO DO ESTADO DA BAHIA\s*\n?\s*POL[ÍI]CIA CIVIL\s*\n?\s*DELEGACIA TERRITORIAL\s*[-–].*?[-–]\s*BA\s*\n?/gi,
+  /GOVERNO DO ESTADO DE SERGIPE\s*\n?\s*POL[ÍI]CIA CIVIL.*?\n/gi,
+  /GOVERNO DO ESTADO DA BAHIA\s*\n?\s*DELEGACIA TERRITORIAL.*?\n/gi,
+  /ESTADO DA BAHIA\s*\n?\s*SECRETARIA DA SEGURAN.A P.BLICA.*?\n/gi,
+  /PODER JUDICI.RIO[\s\n]+TRIBUNAL DE JUSTI.A DO ESTADO DA BAHIA[\s\n]*/gi,
+  /\(documento gerado e assinado automaticamente pelo PJe\)/gi,
+  /Autos n[°º]\s*[\d.\-\/]+\s*\n?/gi,
+];
+function limpar(t) {
+  for (const p of LIXO) t = t.replace(p, "");
+  return t.replace(/\n{3,}/g, "\n\n").replace(/[ \t]+\n/g, "\n")
+          .replace(/\n\|[\s|]*\|\n/g, "\n").trim();
+}
+
+const TIPOS = [
+  ["AUTUAÇÃO",["autuação","autuo o(a) presente"]],
+  ["PORTARIA",["portaria","resolve:","instaurar inquérito"]],
+  ["DENÚNCIA",["oferece a presente den","denuncia como incurso"]],
+  ["SENTENÇA",["vistos, etc","julgo procedente","julgo improcedente","condeno o r","absolvo o r"]],
+  ["PRONÚNCIA",["pronuncio o r","pronuncia o r"]],
+  ["ALEGAÇÕES",["alegações finais","memoriais"]],
+  ["RESPOSTA",["resposta à acusação","defesa prévia"]],
+  ["RECURSO",["apelação","razões recursais","contrarrazões"]],
+  ["BO",["boletim de ocorrência","dados do registro","relato/histórico"]],
+  ["DECLARAÇÃO",["termo de declarações","às perguntas do(a) delegado"]],
+  ["INTERROGATÓRIO",["termo de qualificação e interrogatório"]],
+  ["RELATÓRIO",["relatório final","dos fatos e circunstâncias apuradas"]],
+  ["MPU",["pedido de medida protetiva","medida(s) protetiva(s) de urgência"]],
+  ["RISCO",["formulário nacional de avaliação de risco"]],
+  ["LAUDO",["laudo de exame","lesões corporais","exame médico pericial"]],
+  ["DECISÃO",["decido que","defiro o pedido","indefiro o pedido"]],
+  ["DESPACHO",["despacho","cite-se","intime-se","cumpra-se"]],
+  ["ATA",["ata de audiência","aberta a audiência"]],
+  ["OFÍCIO",["ofício nº","oficio nº"]],
+  ["CARTA PRECATÓRIA",["carta precatória"]],
+  ["BIC",["boletim de informação criminal"]],
+  ["CERTIDÃO",["certifico que","certidão","certidão de publicação"]],
+  ["INTIMAÇÃO",["intimação","fica intimado"]],
+  ["MANDADO",["mandado de"]],
+  ["ALVARÁ",["alvará de soltura"]],
+  ["CONCLUSOS",["autos conclusos"]],
+  ["REMESSA",["remessa","faço a remessa"]],
+  ["RECIBO",["recibo de entrega"]],
+  ["PETIÇÃO",["petição ministerial","petição","registrar ciência"]],
+  ["ASSINATURA",["gerado por sinesp"]],
+];
+const COMPLETAS = new Set(["AUTUAÇÃO","PORTARIA","DENÚNCIA","SENTENÇA","PRONÚNCIA","ALEGAÇÕES",
+  "RESPOSTA","RECURSO","BO","DECLARAÇÃO","INTERROGATÓRIO","RELATÓRIO","MPU","RISCO","LAUDO",
+  "DECISÃO","DESPACHO","ATA","CARTA PRECATÓRIA","PETIÇÃO"]);
+const RESUMO = new Set(["OFÍCIO","BIC","CERTIDÃO","INTIMAÇÃO","MANDADO","ALVARÁ","CONCLUSOS","REMESSA","RECIBO"]);
+const DESCARTE = new Set(["ASSINATURA"]);
+
+const PADROES_PULAR_OCR = [/Gerado por Sinesp/i];
+
+function classificar(t) {
+  const lo = t.toLowerCase().slice(0, 2000);
+  for (const [tipo, kws] of TIPOS) {
+    if (kws.some(kw => lo.includes(kw))) return tipo;
+  }
+  return "DOC";
+}
+
+function primeiraLinha(t, n=120) {
+  for (const l of t.split("\n")) {
+    const c = l.trim().replace(/^#+/,"").replace(/^\*+/,"").trim();
+    if (c.length > 10) return c.slice(0, n);
+  }
+  return t.slice(0, n);
+}
+
+function extrairNumero(nome) {
+  const m = nome.match(/(\d{7}[-.]?\d{2})[_.](\d{4})[_.](\d{1,2})[_.](\d{2})[_.](\d{4})/);
+  if (m) {
+    let p1 = m[1];
+    if (!p1.includes("-") && !p1.includes(".")) p1 = p1.slice(0,7) + "-" + p1.slice(7);
+    return `${p1}.${m[2]}.${m[3]}.${m[4]}.${m[5]}`;
+  }
+  return nome.replace(/\.pdf$/i, "");
+}
+
+function extrairMetaCapa(t) {
+  const meta = { classe: "", assunto: "" };
+  const mc = t.match(/Classe:\s*\*?\*?([^\n*]+)/); if (mc) meta.classe = mc[1].trim();
+  const ma = t.match(/Assuntos?:\s*\*?\*?([^\n*]+)/); if (ma) meta.assunto = ma[1].trim();
+  return meta;
+}
+
+function fmtIds(ids) {
+  if (!ids.length) return "";
+  return ids.map(([n,p]) => `Num. ${n} - Pág. ${p}`).join(", ");
+}
+
+function gerarMarkdown(numero, meta, nPags, grupos) {
+  const md = [`# ${numero}`];
+  const info = [meta.classe, meta.assunto, `${nPags} págs`].filter(Boolean);
+  md.push(info.join(" | "), "");
+  let resumos = [];
+  for (const g of grupos) {
+    const pags = g.pag_ini === g.pag_fim ? `p.${g.pag_ini}` : `p.${g.pag_ini}-${g.pag_fim}`;
+    const ids = fmtIds(g.doc_ids);
+    if (COMPLETAS.has(g.tipo) || g.tipo === "DOC") {
+      if (resumos.length) { md.push("## Peças Secundárias", ...resumos, ""); resumos = []; }
+      let h = `## ${g.tipo} (${pags})`;
+      if (ids) h += ` [${ids}]`;
+      md.push(h, "", g.texto, "");
+    } else if (RESUMO.has(g.tipo)) {
+      let e = `- **${g.tipo}** ${pags}`;
+      if (ids) e += ` [${ids}]`;
+      e += `: ${primeiraLinha(g.texto)}`;
+      resumos.push(e);
+    }
+  }
+  if (resumos.length) md.push("## Peças Secundárias", ...resumos, "");
+  return md.join("\n");
+}
+
+// ============================================================
+// OTIMIZAÇÕES
+// ============================================================
+
+// [HW] Detecção de hardware + política adaptativa de concorrência.
+// Tudo é calculado aqui, uma única vez, e consultado ao longo do pipeline.
+const HW = (() => {
+  const cores = Math.max(1, navigator.hardwareConcurrency || 4);
+  // deviceMemory só existe no Chromium; fallback conservador.
+  const mem = Number(navigator.deviceMemory) || 4;
+
+  // Orçamento total de "slots de trabalho" que o processo pode usar em paralelo
+  // sem derrubar a aba. Memória pesa porque OCR aloca canvas grandes (PT-BR ~30MB).
+  const budget = Math.max(2, Math.min(cores, Math.floor(mem * 1.5)));
+
+  // Workers OCR: cada worker Tesseract = ~40-60MB. Limita por memória.
+  const ocrWorkers = Math.max(1, Math.min(
+    cores,                    // nunca mais que núcleos lógicos
+    Math.floor(mem / 1.2),    // ~1.2GB por worker como teto prudente
+    8                         // teto absoluto — acima disso não compensa
+  ));
+
+  // Extração nativa é barata em CPU e I/O; pode ser agressiva.
+  const nativeConcurrency = Math.max(2, Math.min(cores * 2, 12));
+
+  return {
+    cores, mem, budget, ocrWorkers, nativeConcurrency,
+    // PDFs simultâneos: política dinâmica baseada em tamanho da fila atual.
+    // Muitos PDFs pequenos → paraleliza mais. Poucos e grandes → serializa
+    // para não competir por memória consigo mesmo.
+    pdfsSimultaneos(filaSize, maiorPdfMB) {
+      if (filaSize <= 1) return 1;
+      // Se há PDFs gigantes (>30MB), seriar é mais rápido — menos swap.
+      if (maiorPdfMB > 30) return Math.min(2, filaSize);
+      // Caso normal: escala com memória, teto de 4 e da própria fila.
+      const porMemoria = Math.max(1, Math.floor(mem / 2));
+      return Math.max(1, Math.min(4, porMemoria, filaSize));
+    }
+  };
+})();
+
+// [OPT 1] Extração nativa em paralelo com concorrência controlada
+// [MELHORIA 1] Extração nativa com ordenação correta (y desc, x asc) e
+// espaçamento baseado em gap horizontal. Resolve palavras grudadas,
+// ordem de leitura errada em layouts com colunas, e cabeçalhos do PJe.
+async function extrairTextoNativo(pdf, pageNum) {
+  const page = await pdf.getPage(pageNum);
+  const content = await page.getTextContent({ normalizeWhitespace: true });
+
+  const items = content.items
+    .filter(it => it.str && it.str.length)
+    .map(it => ({
+      str: it.str,
+      x: it.transform[4],
+      y: it.transform[5],
+      w: it.width || 0,
+      h: it.height || 0,
+      eol: it.hasEOL
+    }))
+    .sort((a, b) => (b.y - a.y) || (a.x - b.x)); // y desc, x asc
+
+  let out = "", lastY = null, lastX = null, lastW = 0, lastH = 0;
+  for (const it of items) {
+    if (lastY !== null) {
+      const refH = it.h || lastH || 8;
+      const dy = Math.abs(it.y - lastY);
+      if (dy > refH * 0.5) {
+        // linha nova
+        out += "\n";
+      } else {
+        // mesma linha: só insere espaço se houver gap horizontal real
+        const gap = it.x - (lastX + lastW);
+        if (gap > refH * 0.2 && !out.endsWith(" ") && !out.endsWith("\n")) {
+          out += " ";
+        }
+      }
+    }
+    out += it.str;
+    lastY = it.y; lastX = it.x; lastW = it.w; lastH = it.h;
+  }
+  page.cleanup?.();
+  return out.trim();
+}
+
+async function extrairLote(pdf, concorrencia) {
+  const n = pdf.numPages;
+  const resultados = new Array(n);
+  let idx = 0;
+  // Concorrência adaptativa: não adianta ter mais workers que páginas.
+  const c = Math.max(1, Math.min(concorrencia ?? HW.nativeConcurrency, n));
+  async function worker() {
+    while (idx < n) {
+      const i = idx++;
+      try { resultados[i] = await extrairTextoNativo(pdf, i + 1); }
+      catch (e) { resultados[i] = ""; console.warn(`p.${i+1} nativa:`, e); }
+    }
+  }
+  await Promise.all(Array(c).fill(0).map(worker));
+  return resultados;
+}
+
+// [MELHORIA 2] DPI adaptativo + pré-processamento Otsu (grayscale + binarização)
+// Ganho típico em documentos escaneados: 5-15 pontos percentuais de acurácia.
+async function renderParaOcr(pdf, pageNum) {
+  const page = await pdf.getPage(pageNum);
+  const v1 = page.getViewport({ scale: 1 });
+  const targetPx = 2200; // um pouco acima: ajuda caracteres pequenos
+  const scale = Math.min(3, Math.max(1.5, targetPx / v1.width));
+  const viewport = page.getViewport({ scale });
+  const canvas = document.createElement("canvas");
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  // Fundo branco: evita artefatos em PDFs com transparência
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  await page.render({ canvasContext: ctx, viewport, background: "#ffffff" }).promise;
+
+  // Pré-processamento: grayscale + binarização Otsu
+  try {
+    const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const d = img.data;
+    const total = d.length / 4;
+
+    // 1) Grayscale (luminância padrão ITU-R BT.601)
+    const gray = new Uint8ClampedArray(total);
+    for (let i = 0, j = 0; i < d.length; i += 4, j++) {
+      gray[j] = (d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114) | 0;
+    }
+
+    // 2) Otsu: encontra threshold ótimo a partir do histograma
+    const hist = new Array(256).fill(0);
+    for (let k = 0; k < total; k++) hist[gray[k]]++;
+    let sum = 0;
+    for (let i = 0; i < 256; i++) sum += i * hist[i];
+    let sumB = 0, wB = 0, maxVar = 0, thr = 128;
+    for (let t = 0; t < 256; t++) {
+      wB += hist[t];
+      if (!wB) continue;
+      const wF = total - wB;
+      if (!wF) break;
+      sumB += t * hist[t];
+      const mB = sumB / wB;
+      const mF = (sum - sumB) / wF;
+      const v = wB * wF * (mB - mF) * (mB - mF);
+      if (v > maxVar) { maxVar = v; thr = t; }
+    }
+
+    // 3) Aplica com pequena margem: Tesseract prefere texto ligeiramente "gordo"
+    const adj = Math.min(255, thr + 10);
+    for (let i = 0, j = 0; i < d.length; i += 4, j++) {
+      const v = gray[j] < adj ? 0 : 255;
+      d[i] = d[i + 1] = d[i + 2] = v;
+      // alpha permanece 255
+    }
+    ctx.putImageData(img, 0, 0);
+  } catch (e) {
+    // Se algo falhar no pré-processamento, segue com a imagem original
+    console.warn(`Pré-processamento p.${pageNum}:`, e);
+  }
+
+  page.cleanup?.();
+  return canvas;
+}
+
+// [OPT 2 + MELHORIA 3] Pool de workers Tesseract via Scheduler (compartilhado).
+// Agora configura parâmetros específicos para documentos jurídicos em PT-BR:
+// preserve_interword_spaces resolve palavras grudadas,
+// user_defined_dpi=300 melhora reconhecimento de caracteres pequenos.
+let _scheduler = null;
+let _schedulerPromise = null;
+async function getScheduler(nWorkers) {
+  if (_scheduler) return _scheduler;
+  if (_schedulerPromise) return _schedulerPromise;
+  _schedulerPromise = (async () => {
+    const n = Math.max(1, Math.min(nWorkers || HW.ocrWorkers, 8));
+    const s = Tesseract.createScheduler();
+    const workers = await Promise.all(
+      Array(n).fill(0).map(async () => {
+        const w = await Tesseract.createWorker("por", 1, { cacheMethod: "write" });
+        try {
+          await w.setParameters({
+            tessedit_pageseg_mode: Tesseract.PSM.AUTO,
+            preserve_interword_spaces: "1",
+            user_defined_dpi: "300",
+            tessedit_char_blacklist: "¢§¤¦¬"
+          });
+        } catch (e) {
+          console.warn("setParameters Tesseract:", e);
+        }
+        return w;
+      })
+    );
+    workers.forEach(w => s.addWorker(w));
+    _scheduler = s;
+    return s;
+  })();
+  return _schedulerPromise;
+}
+
+async function ocrCanvas(canvas) {
+  const s = await getScheduler();
+  const { data } = await s.addJob("recognize", canvas);
+  return data.text;
+}
+
+// [OPT 5] Pula OCR em páginas claramente de ruído
+function deveOcrizar(textoNativo, threshold) {
+  if (textoNativo.length >= threshold) return false;
+  if (PADROES_PULAR_OCR.some(r => r.test(textoNativo))) return false;
+  return true;
+}
+
+// ============================================================
+// CACHE IndexedDB (por SHA-256 do arquivo)
+// ============================================================
+const DB_NAME = "extrator_pdf";
+const STORE = "resultados";
+let _db = null;
+
+function openDb() {
+  if (_db) return Promise.resolve(_db);
+  return new Promise((res, rej) => {
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = () => req.result.createObjectStore(STORE, { keyPath: "hash" });
+    req.onsuccess = () => { _db = req.result; res(_db); };
+    req.onerror = () => rej(req.error);
+  });
+}
+
+async function cacheGet(hash) {
+  const db = await openDb();
+  return new Promise((res, rej) => {
+    const r = db.transaction(STORE).objectStore(STORE).get(hash);
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+}
+
+async function cacheSet(hash, data) {
+  const db = await openDb();
+  return new Promise((res, rej) => {
+    const r = db.transaction(STORE, "readwrite").objectStore(STORE).put({ hash, ...data });
+    r.onsuccess = () => res();
+    r.onerror = () => rej(r.error);
+  });
+}
+
+async function cacheClear() {
+  const db = await openDb();
+  return new Promise((res, rej) => {
+    const r = db.transaction(STORE, "readwrite").objectStore(STORE).clear();
+    r.onsuccess = () => res();
+    r.onerror = () => rej(r.error);
+  });
+}
+
+async function cacheCount() {
+  const db = await openDb();
+  return new Promise((res, rej) => {
+    const r = db.transaction(STORE).objectStore(STORE).count();
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+}
+
+async function sha256(buffer) {
+  const h = await crypto.subtle.digest("SHA-256", buffer);
+  return Array.from(new Uint8Array(h)).map(b => b.toString(16).padStart(2,"0")).join("");
+}
+
+// ============================================================
+// PIPELINE PRINCIPAL OTIMIZADO
+// ============================================================
+async function processarPdf(file, opts, onProgress) {
+  const arrayBuffer = await file.arrayBuffer();
+
+  let hash = null;
+  if (opts.useCache) {
+    hash = await sha256(arrayBuffer);
+    const cached = await cacheGet(hash);
+    if (cached) {
+      onProgress({ etapa: "cache" });
+      return { ...cached, fromCache: true };
+    }
+  }
+
+  const pdf = await window.__pdfjs.getDocument({ data: arrayBuffer }).promise;
+  const nPags = pdf.numPages;
+  const numero = extrairNumero(file.name);
+
+  // [OPT 1 + 3] FASE 1: extração nativa paralela (concorrência adaptativa ao HW)
+  onProgress({ etapa: "nativa", pag: 0, total: nPags });
+  const textosNativos = await extrairLote(pdf, HW.nativeConcurrency);
+  onProgress({ etapa: "nativa", pag: nPags, total: nPags });
+
+  // [OPT 3] FASE 2: identificar páginas que precisam de OCR
+  const pagsParaOcr = [];
+  if (opts.useOcr || opts.forceOcr) {
+    for (let i = 0; i < nPags; i++) {
+      const precisa = opts.forceOcr || deveOcrizar(textosNativos[i], opts.threshold);
+      if (precisa) pagsParaOcr.push(i + 1);
+    }
+  }
+
+  // [OPT 2 + 4] FASE 3: OCR paralelo
+  if (pagsParaOcr.length) {
+    let feito = 0;
+    onProgress({ etapa: "ocr", pag: 0, total: pagsParaOcr.length });
+    await Promise.all(pagsParaOcr.map(async (p) => {
+      try {
+        const canvas = await renderParaOcr(pdf, p);
+        const texto = await ocrCanvas(canvas);
+        textosNativos[p - 1] = texto;
+        canvas.width = 0; canvas.height = 0;
+      } catch (e) {
+        console.warn(`OCR p.${p}:`, e);
+      } finally {
+        feito++;
+        onProgress({ etapa: "ocr", pag: feito, total: pagsParaOcr.length });
+      }
+    }));
+  }
+
+  // FASE 4: classificar, limpar, agrupar
+  let charsBruto = 0;
+  const pecas = [];
+  for (let i = 0; i < nPags; i++) {
+    const t = textosNativos[i] || "";
+    charsBruto += t.length;
+    const docId = extrairDocId(t);
+    const limpo = limpar(t);
+    if (limpo.length < 30) continue;
+    const tipo = classificar(limpo);
+    if (DESCARTE.has(tipo)) continue;
+    pecas.push({ pag: i + 1, tipo, texto: limpo, doc_id: docId });
+  }
+
+  const grupos = [];
+  for (const p of pecas) {
+    const u = grupos[grupos.length - 1];
+    if (u && u.tipo === p.tipo) {
+      u.pag_fim = p.pag;
+      u.texto += "\n\n" + p.texto;
+      if (p.doc_id) u.doc_ids.push(p.doc_id);
+    } else {
+      grupos.push({
+        tipo: p.tipo, pag_ini: p.pag, pag_fim: p.pag,
+        texto: p.texto, doc_ids: p.doc_id ? [p.doc_id] : []
+      });
+    }
+  }
+
+  const meta = extrairMetaCapa(textosNativos[0] || "");
+  const mdText = gerarMarkdown(numero, meta, nPags, grupos);
+
+  const resultado = {
+    numero, meta, nPags, pecas: grupos.length,
+    charsBruto, charsLimpo: mdText.length,
+    tokensAprox: Math.floor(mdText.length / 4),
+    reducaoPct: charsBruto > 0 ? (1 - mdText.length / charsBruto) * 100 : 0,
+    paginasOcr: pagsParaOcr.length,
+    mdText,
+  };
+
+  if (opts.useCache && hash) {
+    try { await cacheSet(hash, resultado); }
+    catch (e) { console.warn("cache set falhou:", e); }
+  }
+
+  pdf.destroy?.();
+  return resultado;
+}
+
+// ============================================================
+// UI + FILA
+// ============================================================
+const drop = document.getElementById("drop");
+const fileInput = document.getElementById("file");
+const jobsEl = document.getElementById("jobs");
+const summaryEl = document.getElementById("summary");
+const btnZip = document.getElementById("btnZip");
+const btnClear = document.getElementById("btnClear");
+const btnClearCache = document.getElementById("btnClearCache");
+const cacheInfo = document.getElementById("cacheInfo");
+
+drop.addEventListener("dragover", e => { e.preventDefault(); drop.classList.add("dragover"); });
+drop.addEventListener("dragleave", () => drop.classList.remove("dragover"));
+drop.addEventListener("drop", e => {
+  e.preventDefault(); drop.classList.remove("dragover");
+  enfileirar(e.dataTransfer.files);
+});
+fileInput.addEventListener("change", e => {
+  enfileirar(e.target.files);
+  e.target.value = "";
+});
+
+const fila = [];
+let ativos = 0;
+const resultados = [];
+
+function enfileirar(files) {
+  const pdfs = [...files].filter(f => f.type === "application/pdf");
+  if (!pdfs.length) return;
+
+  // [OPT 6] Pré-aquece Tesseract com nº de workers automático.
+  const opts = lerOpts();
+  if (opts.useOcr || opts.forceOcr) getScheduler().catch(()=>{});
+
+  pdfs.forEach(f => fila.push(f));
+  processarFila();
+}
+
+function lerOpts() {
+  return {
+    useOcr: document.getElementById("optOcr").checked,
+    forceOcr: document.getElementById("optForceOcr").checked,
+    threshold: parseInt(document.getElementById("optThreshold").value) || 50,
+    useCache: document.getElementById("optCache").checked,
+  };
+}
+
+async function processarFila() {
+  const opts = lerOpts();
+  // Política de concorrência reavaliada a cada iteração: se a fila for grande,
+  // sobe o paralelismo; se cair pra 1 PDF gigante, serializa.
+  while (fila.length) {
+    const maiorMB = Math.max(...fila.map(f => f.size / 1024 / 1024), 0);
+    const limite = HW.pdfsSimultaneos(fila.length + ativos, maiorMB);
+    if (ativos >= limite) break;
+    const file = fila.shift();
+    ativos++;
+    processarUI(file, opts).finally(() => {
+      ativos--;
+      atualizarResumo();
+      processarFila();
+    });
+  }
+  atualizarResumo();
+}
+
+async function processarUI(file, opts) {
+  const id = "j_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7);
+  const el = document.createElement("div");
+  el.className = "job";
+  el.id = id;
+  el.innerHTML = `
+    <div class="job-head">
+      <span class="name">${escapeHtml(file.name)}</span>
+      <span class="job-meta">${(file.size/1024/1024).toFixed(1)} MB</span>
+    </div>
+    <div class="bar"><div id="${id}-bar"></div></div>
+    <div class="status" id="${id}-status">Na fila…</div>
+    <div class="stats" id="${id}-stats" style="display:none"></div>
+    <div class="actions" id="${id}-actions" style="display:none"></div>
+  `;
+  jobsEl.prepend(el);
+
+  const bar = document.getElementById(id + "-bar");
+  const st = document.getElementById(id + "-status");
+  const stats = document.getElementById(id + "-stats");
+  const actions = document.getElementById(id + "-actions");
+
+  const t0 = performance.now();
+  try {
+    const r = await processarPdf(file, opts, info => {
+      if (info.etapa === "cache") {
+        st.textContent = "⚡ Cache (já processado anteriormente)";
+        st.className = "status cache";
+        bar.style.width = "100%";
+        return;
+      }
+      const pct = info.total ? (info.pag / info.total) * 100 : 0;
+      bar.style.width = pct + "%";
+      if (info.etapa === "nativa") {
+        bar.classList.remove("ocr");
+        st.textContent = info.pag === info.total
+          ? `📄 Texto extraído (${info.total}p). Analisando OCR…`
+          : `📄 Extraindo texto ${info.pag}/${info.total}`;
+      } else if (info.etapa === "ocr") {
+        bar.classList.add("ocr");
+        st.textContent = `🔍 OCR ${info.pag}/${info.total} páginas escaneadas`;
+      }
+    });
+    const dt = ((performance.now() - t0) / 1000).toFixed(1);
+    bar.style.width = "100%";
+    el.classList.add(r.fromCache ? "cache" : "ok");
+    if (!r.fromCache) {
+      st.textContent = `✓ ${dt}s · ${r.paginasOcr ? r.paginasOcr + " pág OCR" : "sem OCR"}`;
+      st.className = "status ok";
+    }
+
+    stats.style.display = "grid";
+    stats.innerHTML = `
+      <div class="stat"><b>${r.nPags}</b><span>páginas</span></div>
+      <div class="stat"><b>${r.pecas}</b><span>peças</span></div>
+      <div class="stat"><b>${r.paginasOcr}</b><span>OCR</span></div>
+      <div class="stat"><b>${r.tokensAprox.toLocaleString("pt-BR")}</b><span>tokens</span></div>
+      <div class="stat"><b>${r.reducaoPct.toFixed(0)}%</b><span>redução</span></div>
+    `;
+
+    const filename = r.numero.replace(/[.\-]/g,"_") + ".md";
+    resultados.push({ filename, mdText: r.mdText, r });
+
+    actions.style.display = "flex";
+    const btnDl = botao("⬇ Baixar .md", () => baixarTexto(filename, r.mdText));
+    const btnPrev = botao("👁 Prévia", () => preview(r.mdText), true);
+    actions.append(btnDl, btnPrev);
+
+    btnZip.disabled = false;
+    atualizarCacheInfo();
+  } catch (err) {
+    el.classList.add("err");
+    st.textContent = "✗ Erro: " + err.message;
+    st.className = "status err";
+    console.error(err);
+  }
+}
+
+function botao(label, onclick, ghost=false) {
+  const b = document.createElement("button");
+  b.textContent = label;
+  if (ghost) b.className = "ghost";
+  b.onclick = onclick;
+  return b;
+}
+
+function baixarTexto(name, content) {
+  const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
+  baixarBlob(name, blob);
+}
+
+function baixarBlob(name, blob) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+function preview(txt) {
+  document.getElementById("preview-body").textContent = txt;
+  document.getElementById("preview-modal").classList.add("open");
+}
+
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+
+function atualizarResumo() {
+  if (!resultados.length && !fila.length && !ativos) {
+    summaryEl.classList.remove("visible");
+    return;
+  }
+  const totPecas = resultados.reduce((s,x) => s + x.r.pecas, 0);
+  const totOcr = resultados.reduce((s,x) => s + x.r.paginasOcr, 0);
+  const totTok = resultados.reduce((s,x) => s + x.r.tokensAprox, 0);
+  const cache = resultados.filter(x => x.r.fromCache).length;
+
+  summaryEl.classList.add("visible");
+  summaryEl.innerHTML = `
+    <div class="summary-grid">
+      <div><b>${resultados.length}</b><span>PDFs prontos</span></div>
+      <div><b>${fila.length + ativos}</b><span>na fila</span></div>
+      <div><b>${totPecas}</b><span>peças total</span></div>
+      <div><b>${totOcr}</b><span>páginas OCR</span></div>
+      <div><b>${totTok.toLocaleString("pt-BR")}</b><span>tokens total</span></div>
+    </div>
+    ${cache ? `<div class="sub" style="margin-top:8px">⚡ ${cache} reusado(s) do cache</div>` : ""}
+  `;
+}
+
+btnZip.addEventListener("click", async () => {
+  if (!resultados.length) return;
+  btnZip.disabled = true;
+  const oldText = btnZip.textContent;
+  btnZip.textContent = "📦 Empacotando…";
+  try {
+    const zip = new JSZip();
+    for (const { filename, mdText } of resultados) {
+      zip.file(filename, mdText);
+    }
+    const relatorio = {
+      gerado_em: new Date().toISOString(),
+      total: resultados.length,
+      processos: resultados.map(x => ({
+        numero: x.r.numero,
+        classe: x.r.meta.classe,
+        assunto: x.r.meta.assunto,
+        total_paginas: x.r.nPags,
+        pecas: x.r.pecas,
+        tokens_aprox: x.r.tokensAprox,
+        paginas_ocr: x.r.paginasOcr,
+        md: x.filename,
+      })),
+    };
+    zip.file("_relatorio.json", JSON.stringify(relatorio, null, 2));
+    const blob = await zip.generateAsync({ type: "blob" });
+    const stamp = new Date().toISOString().slice(0,16).replace(/[:T]/g,"-");
+    baixarBlob(`extracoes_${stamp}.zip`, blob);
+  } finally {
+    btnZip.textContent = oldText;
+    btnZip.disabled = false;
+  }
+});
+
+btnClear.addEventListener("click", () => {
+  if (ativos > 0 && !confirm("Há PDFs processando. Limpar mesmo assim?")) return;
+  jobsEl.innerHTML = "";
+  resultados.length = 0;
+  btnZip.disabled = true;
+  atualizarResumo();
+});
+
+btnClearCache.addEventListener("click", async () => {
+  if (!confirm("Limpar cache de PDFs processados? Eles precisarão ser re-extraídos.")) return;
+  await cacheClear();
+  atualizarCacheInfo();
+});
+
+async function atualizarCacheInfo() {
+  try {
+    const n = await cacheCount();
+    cacheInfo.textContent = n ? `${n} PDF(s) em cache` : "";
+  } catch {}
+}
+atualizarCacheInfo();
+
+// Mostra o perfil de hardware detectado (ajuda a entender por que X PDFs
+// rodam em paralelo e Y workers OCR foram abertos).
+(function mostrarHw() {
+  const el = document.getElementById("hwInfoText");
+  if (!el) return;
+  const mem = navigator.deviceMemory ? `${navigator.deviceMemory}GB RAM` : "RAM indet.";
+  el.textContent = `${HW.cores} núcleos · ${mem} · ${HW.ocrWorkers} workers OCR · até ${HW.pdfsSimultaneos(4, 5)} PDFs em paralelo`;
+})();
+
+window.addEventListener("beforeunload", () => {
+  if (_scheduler) _scheduler.terminate();
+});
+</script>
+</body>
+</html>
